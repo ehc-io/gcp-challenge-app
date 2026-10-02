@@ -1,0 +1,16 @@
+# Load balancer backend settings for the tasky Service
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: tasky
+  namespace: tasky
+  labels:
+    app.kubernetes.io/name: tasky
+spec:
+  # Cloud Armor policy managed in Terraform (infra/cloud_armor.tf); must exist before this is applied
+  securityPolicy:
+    name: ehc-app-armor
+  # Request logs include the Cloud Armor outcome (jsonPayload.enforcedSecurityPolicy)
+  logging:
+    enable: true
+    sampleRate: 1.0

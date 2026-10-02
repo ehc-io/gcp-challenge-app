@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tasky
+  namespace: tasky
+  labels:
+    app.kubernetes.io/name: tasky
+  annotations:
+    # Container-native load balancing: the load balancer targets Pod IPs through a NEG
+    cloud.google.com/neg: '{"ingress": true}'
+    # Backend settings (Cloud Armor policy, request logging)
+    cloud.google.com/backend-config: '{"default": "tasky"}'
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tasky
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

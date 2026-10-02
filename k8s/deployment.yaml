@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tasky
+  namespace: tasky
+  labels:
+    app.kubernetes.io/name: tasky
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tasky
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tasky
+    spec:
+      serviceAccountName: tasky
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tasky
+          # Tag is set by kustomization.yaml
+          image: us-central1-docker.pkg.dev/clgcporg10-178/ehc-app/tasky
+          # The app listens on 8080. infra/firewall.tf reads this port for the load balancer firewall rule.
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: tasky-env
+                  key: MONGODB_URI
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tasky-env
+                  key: SECRET_KEY
+            - name: MONGODB_DATABASE
+              value: todo
+            - name: GIN_MODE
+              value: release
+          # The load balancer health check is derived from this probe (GET / on the serving port)
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

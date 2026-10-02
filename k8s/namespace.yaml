@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tasky
+  labels:
+    app.kubernetes.io/part-of: tasky
+    # Pod Security Admission: warn and audit against the restricted profile without blocking
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

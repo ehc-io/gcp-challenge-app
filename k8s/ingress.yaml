@@ -1,0 +1,18 @@
+# External Application Load Balancer (HTTP only) on the reserved global address ehc-app-ip (infra/ingress_ip.tf)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tasky
+  namespace: tasky
+  labels:
+    app.kubernetes.io/name: tasky
+  annotations:
+    kubernetes.io/ingress.class: gce
+    # Reserved global address; must exist before this Ingress is applied
+    kubernetes.io/ingress.global-static-ip-name: ehc-app-ip
+spec:
+  defaultBackend:
+    service:
+      name: tasky
+      port:
+        number: 80
