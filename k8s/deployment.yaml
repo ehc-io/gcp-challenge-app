@@ -27,7 +27,7 @@ spec:
         - name: tasky
           # Tag is set by kustomization.yaml
           image: us-central1-docker.pkg.dev/clgcporg10-178/ehc-app/tasky
-          # The app listens on 8080. infra/firewall.tf reads this port for the load balancer firewall rule.
+          # The app listens on 8080. The load balancer firewall rule in the infrastructure repository opens this port (app_port).
           ports:
             - name: http
               containerPort: 8080
