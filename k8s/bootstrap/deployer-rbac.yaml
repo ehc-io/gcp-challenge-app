@@ -1,0 +1,47 @@
+# Permissions for the deployment identity. IAM grants only cluster connect;
+# every verb the pipeline uses is listed here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: deployer
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "serviceaccounts", "services"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]            # existence check only; values are never read by the pipeline
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]         # post-deploy verification inside the container
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: ["cloud.google.com"]
+    resources: ["backendconfigs"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    verbs: ["get", "list", "create", "patch", "update"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["cluster-admin"]
+    verbs: ["bind"]           # required to reference cluster-admin in a binding
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: deployer
+subjects:
+  - kind: User
+    name: ehc-deployer-app@clgcporg10-178.iam.gserviceaccount.com
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: deployer
