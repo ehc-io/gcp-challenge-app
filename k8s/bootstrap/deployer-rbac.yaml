@@ -1,22 +1,22 @@
 # Permissions for the deployment identity. IAM grants only cluster connect;
-# every verb the pipeline uses is listed here.
+# every verb the pipeline uses is listed here. Applied by a cluster administrator
+# after k8s/namespace.yaml, which the deployment identity cannot create or change.
+#
+# Namespaced objects are granted through a Role in the tasky namespace only.
+# No access to secrets (the Deployment references tasky-env; a missing Secret
+# fails the rollout) and no pods/exec.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: deployer
+  namespace: tasky
 rules:
   - apiGroups: [""]
-    resources: ["namespaces", "serviceaccounts", "services"]
+    resources: ["serviceaccounts", "services"]
     verbs: ["get", "list", "watch", "create", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get"]            # existence check only; values are never read by the pipeline
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["create"]         # post-deploy verification inside the container
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets"]
     verbs: ["get", "list", "watch", "create", "patch", "update"]
@@ -26,9 +26,34 @@ rules:
   - apiGroups: ["cloud.google.com"]
     resources: ["backendconfigs"]
     verbs: ["get", "list", "watch", "create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deployer
+  namespace: tasky
+subjects:
+  - kind: User
+    name: ehc-deployer-app@clgcporg10-178.iam.gserviceaccount.com
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: deployer
+---
+# Cluster-scoped: only what is needed to manage the application's cluster-admin binding.
+# Create cannot be limited by name; reads and updates are limited to that one binding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: deployer
+rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterrolebindings"]
-    verbs: ["get", "list", "create", "patch", "update"]
+    verbs: ["create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    resourceNames: ["tasky-cluster-admin"]
+    verbs: ["get", "patch", "update"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     resourceNames: ["cluster-admin"]
