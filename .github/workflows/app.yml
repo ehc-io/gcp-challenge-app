@@ -98,8 +98,9 @@ jobs:
           SCAN=$(gcloud artifacts docker images scan "$IMAGE:${{ steps.meta.outputs.tag }}" \
                    --project "$PROJECT_ID" --format='value(response.scan)')
           gcloud artifacts docker images list-vulnerabilities "$SCAN" --project "$PROJECT_ID" --format=json > vulns.json
-          jq -r '.[] | .vulnerability | "\(.effectiveSeverity)\t\(.shortDescription)\t\(if any(.packageIssue[]; .fixAvailable) then "fix available" else "no fix" end)"' vulns.json \
-            | sort | uniq -c | sort -rn | head -40
+          # Count by severity, package and fixed version
+          jq -r '.[] | .vulnerability as $v | $v.packageIssue[] | "\($v.effectiveSeverity)\t\(.affectedPackage) \(.affectedVersion.name)\t\(if .fixAvailable then "fixed in \(.fixedVersion.name)" else "no fix" end)"' vulns.json \
+            | sort | uniq -c | sort -k2,2 -k3,3 | head -40
           BLOCKING=$(jq '[.[] | .vulnerability | select(.effectiveSeverity == "CRITICAL" or .effectiveSeverity == "HIGH") | select(any(.packageIssue[]; .fixAvailable))] | length' vulns.json)
           echo "Fixable CRITICAL/HIGH vulnerabilities: $BLOCKING"
           if [ "$BLOCKING" -gt 0 ]; then
