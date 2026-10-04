@@ -1,3 +1,5 @@
+# Created by a cluster administrator before the first deployment, together with
+# bootstrap/deployer-rbac.yaml. The deployment identity has no access to namespaces.
 apiVersion: v1
 kind: Namespace
 metadata:

@@ -1,0 +1,10 @@
+# Accepted misconfiguration findings. Each entry is limited to the file it applies to
+# and expires, so it has to be reviewed again rather than staying forever.
+misconfigurations:
+  - id: KSV-0056
+    paths:
+      - "k8s/bootstrap/deployer-rbac.yaml"
+    statement: >-
+      The deployment identity creates and updates the application's own Service and
+      Ingress. The grant is a Role in the tasky namespace only, with no delete verb.
+    expired_at: 2027-04-01
