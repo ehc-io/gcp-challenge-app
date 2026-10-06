@@ -2,10 +2,10 @@ name: app
 
 on:
   pull_request:
-    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml"]
+    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml", ".github/scripts/**"]
   push:
     branches: [main]
-    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml"]
+    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml", ".github/scripts/**"]
 
 permissions:
   contents: read
@@ -36,6 +36,9 @@ jobs:
           scan-ref: .
           severity: HIGH,CRITICAL
           exit-code: "1"
+          format: sarif
+          output: trivy-secret.sarif
+          limit-severities-for-sarif: true
 
       # Accepted findings live in .trivyignore.yaml, each limited to one file and with an expiry date
       - name: Misconfiguration scan (manifests and Dockerfile)
@@ -51,8 +54,17 @@ jobs:
           output: trivy-config.sarif
           limit-severities-for-sarif: true
 
-      - name: Upload scan results
-        if: always()
+      # Each scan has its own category so its alerts are tracked separately. A report is missing
+      # when an earlier scan failed and skipped the step that writes it.
+      - name: Upload secret scan results
+        if: always() && hashFiles('trivy-secret.sarif') != ''
+        uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          sarif_file: trivy-secret.sarif
+          category: trivy-secret
+
+      - name: Upload misconfiguration scan results
+        if: always() && hashFiles('trivy-config.sarif') != ''
         uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           sarif_file: trivy-config.sarif
@@ -66,6 +78,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      security-events: write
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
     steps:
@@ -107,6 +120,21 @@ jobs:
             echo "::error::Image has $BLOCKING fixable CRITICAL/HIGH vulnerabilities; not pushing"
             exit 1
           fi
+
+      # All severities go to code scanning; the gate above blocks only fixable CRITICAL/HIGH
+      - name: Convert vulnerability report to SARIF
+        if: always() && hashFiles('vulns.json') != ''
+        run: |
+          jq -n --slurpfile vulns vulns.json --rawfile gomod app/go.mod --rawfile dockerfile app/Dockerfile \
+            -f .github/scripts/vulnerabilities-to-sarif.jq > image-vulnerabilities.sarif
+          echo "Results: $(jq '.runs[0].results | length' image-vulnerabilities.sarif)"
+
+      - name: Upload vulnerability scan results
+        if: always() && hashFiles('image-vulnerabilities.sarif') != ''
+        uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          sarif_file: image-vulnerabilities.sarif
+          category: image-vulnerabilities
 
       - name: Upload vulnerability report
         if: always()
