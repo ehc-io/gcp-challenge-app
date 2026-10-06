@@ -2,10 +2,10 @@ name: app
 
 on:
   pull_request:
-    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml", ".github/scripts/**"]
+    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml"]
   push:
     branches: [main]
-    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml", ".github/scripts/**"]
+    paths: ["app/**", "k8s/**", ".trivyignore.yaml", ".github/workflows/app.yml"]
 
 permissions:
   contents: read
@@ -75,9 +75,9 @@ jobs:
     needs: scan
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # No cloud credentials: the image is built and scanned on the runner and pushed only by the deploy job
     permissions:
       contents: read
-      id-token: write
       security-events: write
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -86,16 +86,6 @@ jobs:
 
       - id: meta
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SA_SCAN }}
-
-      # local-extract is required to scan a local image with On-Demand Scanning
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-        with:
-          install_components: local-extract
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -106,42 +96,28 @@ jobs:
       - name: Check name file in the image
         run: docker run --rm --entrypoint cat "$IMAGE:${{ steps.meta.outputs.tag }}" /app/wizexercise.txt
 
-      - name: Vulnerability scan (Artifact Analysis On-Demand Scanning)
-        run: |
-          SCAN=$(gcloud artifacts docker images scan "$IMAGE:${{ steps.meta.outputs.tag }}" \
-                   --project "$PROJECT_ID" --format='value(response.scan)')
-          gcloud artifacts docker images list-vulnerabilities "$SCAN" --project "$PROJECT_ID" --format=json > vulns.json
-          # Count by severity, package and fixed version
-          jq -r '.[] | .vulnerability as $v | $v.packageIssue[] | "\($v.effectiveSeverity)\t\(.affectedPackage) \(.affectedVersion.name)\t\(if .fixAvailable then "fixed in \(.fixedVersion.name)" else "no fix" end)"' vulns.json \
-            | sort | uniq -c | sort -k2,2 -k3,3 | head -40
-          BLOCKING=$(jq '[.[] | .vulnerability | select(.effectiveSeverity == "CRITICAL" or .effectiveSeverity == "HIGH") | select(any(.packageIssue[]; .fixAvailable))] | length' vulns.json)
-          echo "Fixable CRITICAL/HIGH vulnerabilities: $BLOCKING"
-          if [ "$BLOCKING" -gt 0 ]; then
-            echo "::error::Image has $BLOCKING fixable CRITICAL/HIGH vulnerabilities; not pushing"
-            exit 1
-          fi
-
-      # All severities go to code scanning; the gate above blocks only fixable CRITICAL/HIGH
-      - name: Convert vulnerability report to SARIF
-        if: always() && hashFiles('vulns.json') != ''
-        run: |
-          jq -n --slurpfile vulns vulns.json --rawfile gomod app/go.mod --rawfile dockerfile app/Dockerfile \
-            -f .github/scripts/vulnerabilities-to-sarif.jq > image-vulnerabilities.sarif
-          echo "Results: $(jq '.runs[0].results | length' image-vulnerabilities.sarif)"
+      # Fails on HIGH/CRITICAL vulnerabilities that have a fix, in OS packages and Go modules.
+      # A failed scan skips the hand-off below, so the image never reaches the registry.
+      - name: Vulnerability scan (image)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: sarif
+          output: trivy-image.sarif
+          limit-severities-for-sarif: true
 
       - name: Upload vulnerability scan results
-        if: always() && hashFiles('image-vulnerabilities.sarif') != ''
+        if: always() && hashFiles('trivy-image.sarif') != ''
         uses: github/codeql-action/upload-sarif@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
-          sarif_file: image-vulnerabilities.sarif
-          category: image-vulnerabilities
-
-      - name: Upload vulnerability report
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: image-vulnerabilities-${{ steps.meta.outputs.tag }}
-          path: vulns.json
+          sarif_file: trivy-image.sarif
+          category: trivy-image
 
       - name: Save scanned image
         if: github.event_name == 'push'
