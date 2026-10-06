@@ -16,6 +16,8 @@ env:
   IMAGE: us-central1-docker.pkg.dev/clgcporg10-178/ehc-app/tasky
   CLUSTER: ehc-gke
   ZONE: us-central1-a
+  ATTESTOR: projects/clgcporg10-178/attestors/ehc-image-gate
+  ATTESTOR_KEY_VERSION: projects/clgcporg10-178/locations/us-central1/keyRings/ehc-binauthz/cryptoKeys/ehc-image-gate/cryptoKeyVersions/1
 
 jobs:
   scan:
@@ -179,22 +181,44 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SA_APP }}
 
+      # beta provides "container binauthz attestations sign-and-create"
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
         with:
-          install_components: gke-gcloud-auth-plugin
+          install_components: gke-gcloud-auth-plugin,beta
 
       - name: Push image
+        id: push
         run: |
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
           docker push "$IMAGE:${{ needs.build.outputs.tag }}"
+          # Tags are immutable in this repository, so the tag resolves to the image just pushed
+          DIGEST=$(gcloud artifacts docker images describe "$IMAGE:${{ needs.build.outputs.tag }}" \
+                     --project "$PROJECT_ID" --format='value(image_summary.digest)')
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Unexpected image digest: '$DIGEST'"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Pushed $IMAGE:${{ needs.build.outputs.tag }} = $IMAGE@$DIGEST"
+
+      # Binary Authorization admits only digests signed with this key. The signature is created
+      # here, after the image passed the vulnerability gate and the deployment was approved.
+      - name: Attest image
+        run: |
+          gcloud beta container binauthz attestations sign-and-create \
+            --project "$PROJECT_ID" \
+            --artifact-url "$IMAGE@${{ steps.push.outputs.digest }}" \
+            --attestor "$ATTESTOR" \
+            --keyversion "$ATTESTOR_KEY_VERSION" \
+            --validate
 
       - name: Cluster credentials
         run: gcloud container clusters get-credentials "$CLUSTER" --zone "$ZONE" --project "$PROJECT_ID" --dns-endpoint
 
-      - name: Set image tag
+      - name: Set image digest
         run: |
-          sed -i "s/newTag: .*/newTag: ${{ needs.build.outputs.tag }}/" k8s/kustomization.yaml
-          grep -n "newTag:" k8s/kustomization.yaml
+          sed -i -E "s/^( +)digest: .*/\1digest: ${{ steps.push.outputs.digest }}/" k8s/kustomization.yaml
+          grep -nE "^ +digest:" k8s/kustomization.yaml
 
       # The namespace and the tasky-env Secret are created out of band. A missing namespace fails the
       # apply; a missing Secret shows as CreateContainerConfigError in the events printed below.

@@ -7,6 +7,8 @@ resources:
   - backendconfig.yaml
   - service.yaml
   - ingress.yaml
+# The image is referenced by its digest because Binary Authorization looks up attestations
+# by digest, not by tag. The pipeline sets the value at deploy time.
 images:
   - name: us-central1-docker.pkg.dev/clgcporg10-178/ehc-app/tasky
-    newTag: REPLACE_WITH_GIT_SHA
+    digest: REPLACE_WITH_IMAGE_DIGEST
